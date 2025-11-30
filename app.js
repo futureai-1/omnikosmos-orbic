@@ -1,237 +1,295 @@
-// Orbic Intelligence v3.1 — app.js
-// All audio processing is client-side. Keep code minimal and robust.
+// Simple client-side orb visualization + WebAudio analyser
+// Minimal, privacy-first: NO audio upload. All processing local.
 
-let audioCtx, analyser, dataArray, source;
-let canvas = document.getElementById('orbCanvas'), ctx = canvas.getContext('2d');
-let startBtn = document.getElementById('startBtn'), stopBtn = document.getElementById('stopBtn');
-let createPulseBtn = document.getElementById('createPulseBtn'), shareLatestBtn = document.getElementById('shareLatestBtn');
-let volBar = document.getElementById('volBar'), freqBar = document.getElementById('freqBar'), moodText = document.getElementById('moodText');
-let sensitivityEl = document.getElementById('sensitivity'), calmEl = document.getElementById('calmThreshold');
-let orbHueEl = document.getElementById('orbHue'), orbLifeEl = document.getElementById('orbLife');
-let pulseList = document.getElementById('pulseList'), exportJSON = document.getElementById('exportJSON'), clearGallery = document.getElementById('clearGallery');
-let pulses = []; const STORAGE_KEY = 'orbic_pulses_v3';
+(() => {
+  // elements
+  const startBtn = document.getElementById('startMic');
+  const stopBtn = document.getElementById('stopMic');
+  const createPulseBtn = document.getElementById('createPulse');
+  const shareLatestBtn = document.getElementById('shareLatest');
+  const volBar = document.getElementById('volBar');
+  const volValue = document.getElementById('volValue');
+  const freqBar = document.getElementById('freqBar');
+  const freqValue = document.getElementById('freqValue');
+  const moodEl = document.getElementById('mood');
+  const pulseList = document.getElementById('pulseList');
 
-let running = false;
-let fitResizeTimeout = null;
-let settings = { sensitivity:1, calm:0.01, hue:150, life:1.5 };
+  const sensitivityInput = document.getElementById('sensitivity');
+  const calmInput = document.getElementById('calmThreshold');
+  const orbHueInput = document.getElementById('orbHue');
+  const orbLifeInput = document.getElementById('orbLife');
 
-function registerSW(){
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./service-worker.js').catch(e=>console.warn('SW failed', e));
+  // nav
+  const navBtns = document.querySelectorAll('.nav-btn');
+  navBtns.forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      const section = b.dataset.section;
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(section).classList.add('active');
+    });
+  });
+
+  // canvas orb
+  const canvas = document.getElementById('orbCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Keep canvas resolution crisp
+  function resizeCanvas() {
+    const ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = Math.floor(w * ratio);
+    canvas.height = Math.floor(h * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
-}
-registerSW();
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
-// load pulses
-function loadPulses(){
-  try{ const raw = localStorage.getItem(STORAGE_KEY); pulses = raw?JSON.parse(raw):[]; }catch(e){pulses=[];}
-  renderGallery();
-}
-function savePulses(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(pulses)); }
+  // audio setup
+  let audioCtx, analyser, source, mediaStream;
+  let freqData, timeData;
+  let raf = null;
 
-function fit(){
-  const r = Math.max(1, window.devicePixelRatio || 1);
-  const cssW = canvas.clientWidth || canvas.parentElement.clientWidth;
-  const cssH = canvas.clientHeight || canvas.parentElement.clientHeight;
-  canvas.width = Math.round(cssW * r);
-  canvas.height = Math.round(cssH * r);
-  ctx.setTransform(r,0,0,r,0,0);
-}
-window.addEventListener('resize', ()=>{
-  clearTimeout(fitResizeTimeout);
-  fitResizeTimeout = setTimeout(fit, 80);
-});
+  // gallery
+  const pulses = [];
 
-fit();
+  function startAudio() {
+    if (audioCtx) return;
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(stream => {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
 
-// draw orb
-let particles = [];
-function drawOrb(vol, freq){
-  // adapt particle count to volume to reduce CPU
-  const baseCount = 12;
-  const count = Math.min(120, Math.round(baseCount + (vol>0.01 ? vol*260 : vol*60) + (freq/200)));
-  if(particles.length < count){
-    for(let i=particles.length;i<count;i++){
-      particles.push({x:Math.random(),y:Math.random(),r:Math.random()*0.6+0.4,life:Math.random()*1});
+        source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+        freqData = new Uint8Array(analyser.frequencyBinCount);
+        timeData = new Uint8Array(analyser.frequencyBinCount);
+        mediaStream = stream;
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        loop();
+      })
+      .catch(err => {
+        alert('Microphone access denied or not available: '+err.message);
+      });
+  }
+
+  function stopAudio() {
+    if (!audioCtx) return;
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t=>t.stop());
     }
-  } else if(particles.length > count){
-    particles.length = count;
+    cancelAnimationFrame(raf);
+    audioCtx.close();
+    audioCtx = null;
+    analyser = null;
+    source = null;
+    mediaStream = null;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    clearVis();
   }
 
-  const w = canvas.width/ (window.devicePixelRatio||1);
-  const h = canvas.height/ (window.devicePixelRatio||1);
-  ctx.clearRect(0,0,w,h);
+  // compute RMS and primary frequency estimate
+  function analyze() {
+    analyser.getByteTimeDomainData(timeData);
+    analyser.getByteFrequencyData(freqData);
 
-  // background subtle gradient
-  const g = ctx.createLinearGradient(0,0,w,h);
-  g.addColorStop(0, 'rgba(2,10,12,0.6)');
-  g.addColorStop(1, 'rgba(4,10,12,0.45)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,w,h);
+    // rms: convert to -1..1 baseline
+    let sum = 0;
+    for (let i=0;i<timeData.length;i++){
+      const v = (timeData[i]-128)/128;
+      sum += v*v;
+    }
+    const rms = Math.sqrt(sum / timeData.length);
 
-  // central orb
-  const cx = w*0.72, cy = h*0.65;
-  const size = Math.max(38, 120 * (0.5 + vol*6));
-  const hue = settings.hue;
-  for(let i=5;i>0;i--){
-    const a = 0.06 * Math.pow(1.6,i);
-    ctx.beginPath();
-    const r = size * (1 + i*0.18) * (1 + Math.sin(Date.now()/1000/settings.life)*0.03);
-    ctx.arc(cx, cy, r, 0, Math.PI*2);
-    ctx.fillStyle = `hsla(${hue},80%,50%,${a})`;
+    // frequency: find max bin
+    let maxIndex = 0;
+    let maxVal = -Infinity;
+    for (let i=0;i<freqData.length;i++){
+      if (freqData[i] > maxVal) { maxVal = freqData[i]; maxIndex = i; }
+    }
+    const nyquist = audioCtx.sampleRate / 2;
+    const freq = Math.round(maxIndex * nyquist / freqData.length);
+
+    return { rms, freq, spectrumMaxValue: maxVal };
+  }
+
+  // mood mapping
+  function computeMood(rms, freq) {
+    const calmTh = parseFloat(calmInput.value);
+    if (rms < calmTh) return 'Calm';
+    if (freq > 2000 || rms > 0.12) return 'Active';
+    if (freq > 800) return 'Alert';
+    return 'Normal';
+  }
+
+  // draw orb visuals
+  let lifePhase = 0;
+  function drawOrb(rms, freq) {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+
+    // background subtle
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0, '#031619');
+    g.addColorStop(1, '#031214');
+    ctx.fillStyle = g;
+    roundRect(ctx, 0, 0, w, h, 12);
     ctx.fill();
-  }
 
-  // particles (rings)
-  particles.forEach((p, idx)=>{
-    const life = (p.life + idx*0.0001 + vol*0.3) % 1;
-    const radius = size * (1 + life*3) * p.r;
+    // parameters
+    const hue = parseInt(orbHueInput.value,10);
+    const life = parseFloat(orbLifeInput.value);
+    lifePhase += 0.02 * life;
+    const breath = (Math.sin(lifePhase)+1)*0.5* (0.02 + rms*2.5); // size breathing
+    const baseR = Math.min(w,h) * 0.12;
+    const r = baseR * (1 + breath);
+
+    // center
+    const cx = w/2;
+    const cy = h/2;
+
+    // rings
+    for (let i=4;i>0;i--){
+      const alpha = 0.06 * (i);
+      ctx.beginPath();
+      ctx.arc(cx,cy, r + i*18 + (rms*80), 0, Math.PI*2);
+      ctx.strokeStyle = `hsla(${hue},85%,50%,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // core glow radial
+    const rg = ctx.createRadialGradient(cx - r*0.25, cy - r*0.25, r*0.15, cx, cy, r*1.6);
+    rg.addColorStop(0, `hsla(${hue},95%,65%,0.95)`);
+    rg.addColorStop(0.25, `hsla(${hue},85%,55%,0.6)`);
+    rg.addColorStop(1, `hsla(${hue},60%,25%,0)`);
+
     ctx.beginPath();
-    ctx.arc(cx + Math.sin(idx + Date.now()/2000)*8, cy + Math.cos(idx + Date.now()/2000)*6, radius, 0, Math.PI*2);
-    ctx.strokeStyle = `hsla(${(hue+ (idx%7)*6)%360},70%,55%,${0.08 + (1-life)*0.08})`;
-    ctx.lineWidth = 1.6; ctx.stroke();
-    p.life += 0.004 + vol*0.04;
+    ctx.arc(cx,cy, r*1.6, 0, Math.PI*2);
+    ctx.fillStyle = rg;
+    ctx.fill();
+
+    // inner sphere
+    const innerG = ctx.createRadialGradient(cx - r*0.3, cy - r*0.3, 1, cx, cy, r*0.9);
+    innerG.addColorStop(0, `hsla(${hue},95%,80%,1)`);
+    innerG.addColorStop(0.15, `hsla(${hue},90%,65%,0.95)`);
+    innerG.addColorStop(0.6, `hsla(${hue},80%,48%,0.9)`);
+    innerG.addColorStop(1, `hsla(${hue},70%,30%,0.9)`);
+
+    ctx.beginPath();
+    ctx.arc(cx,cy, r*0.95, 0, Math.PI*2);
+    ctx.fillStyle = innerG;
+    ctx.fill();
+
+    // small highlights (randomized but consistent)
+    for (let i=0;i<6;i++){
+      const a = lifePhase*0.6 + i*0.9;
+      const px = cx + Math.cos(a) * r*0.45;
+      const py = cy + Math.sin(a) * r*0.25;
+      ctx.beginPath();
+      ctx.arc(px,py, Math.max(1, r*0.05), 0, Math.PI*2);
+      ctx.fillStyle = `hsla(${hue+20},95%,90%,0.25)`;
+      ctx.fill();
+    }
+  }
+
+  // helper: rounded rect
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function clearVis(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+
+  // animation loop
+  function loop(){
+    if (!analyser) return;
+    const { rms, freq } = analyze();
+
+    // UI
+    const sens = parseFloat(sensitivityInput.value);
+    const scaledRms = Math.min(1, rms * (1 + sens*4));
+    volBar.style.width = `${Math.min(100, scaledRms*400)}%`; // exaggerate for visibility
+    volValue.textContent = scaledRms.toFixed(4);
+
+    // freq bar: map 0..8000Hz to 0..100%
+    const fPct = Math.min(1, freq / 4000);
+    freqBar.style.width = `${Math.round(fPct*100)}%`;
+    freqValue.textContent = freq;
+
+    const mood = computeMood(scaledRms, freq);
+    moodEl.textContent = mood;
+
+    drawOrb(scaledRms, freq);
+
+    raf = requestAnimationFrame(loop);
+  }
+
+  // pulses
+  function createPulse() {
+    const time = new Date().toISOString();
+    const item = {
+      time,
+      vol: volValue.textContent,
+      freq: freqValue.textContent,
+      mood: moodEl.textContent
+    };
+    pulses.unshift(item);
+    renderPulses();
+  }
+
+  function renderPulses(){
+    pulseList.innerHTML = '';
+    pulses.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'pulse-item';
+      div.innerHTML = `<div><strong>${p.mood}</strong> <small>${new Date(p.time).toLocaleString()}</small></div>
+                       <div style="color:var(--muted)">${p.vol} · ${p.freq}Hz</div>`;
+      pulseList.appendChild(div);
+    });
+  }
+
+  // share/export
+  function exportJSON(){
+    const blob = new Blob([JSON.stringify(pulses, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'omnikosmos-pulses.json'; document.body.appendChild(a);
+    a.click(); a.remove();
+  }
+
+  function clearGallery(){
+    pulses.length = 0;
+    renderPulses();
+  }
+
+  // events
+  startBtn.addEventListener('click', startAudio);
+  stopBtn.addEventListener('click', stopAudio);
+  createPulseBtn.addEventListener('click', createPulse);
+  shareLatestBtn.addEventListener('click', () => {
+    if (!pulses[0]) { alert('No pulses yet'); return; }
+    navigator.clipboard?.writeText(JSON.stringify(pulses[0],null,2)).then(()=>alert('Latest pulse copied to clipboard'));
   });
-}
 
-// analysis & UI
-function updateUI(vol, freq){
-  volBar.value = Math.min(volBar.max, vol);
-  freqBar.value = Math.min(freqBar.max, freq);
-  // mood
-  let mood = 'Neutral';
-  if(vol < settings.calm) mood = 'Calm';
-  else if(freq > 2000 || vol > 0.08) mood = 'Active';
-  else if(freq > 800) mood = 'Alert';
-  else mood = 'Normal';
-  moodText.textContent = mood; moodText.style.color = mood==='Calm'? 'var(--accent1)' : (mood==='Active'?'#f0b030':'var(--muted)');
-}
+  document.getElementById('exportJSON').addEventListener('click', exportJSON);
+  document.getElementById('clearGallery').addEventListener('click', clearGallery);
 
-// start/stop audio
-async function startMic(){
-  if(running) return;
-  try{
-    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio:true, video:false });
-    source = audioCtx.createMediaStreamSource(stream);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.85;
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-    source.connect(analyser);
-    // set freqBar max based on sample rate
-    freqBar.max = audioCtx.sampleRate/2;
-    running = true;
-    runLoop();
-  }catch(e){
-    console.warn('Mic start error', e);
-    alert('Unable to access microphone. Check permission and try again.');
-  }
-}
-function stopMic(){
-  if(!running) return;
-  if(source && source.mediaStream) {
-    source.mediaStream.getTracks().forEach(t=>t.stop());
-  }
-  if(audioCtx) audioCtx.close();
-  running = false;
-}
-
-// audio processing loop
-function rmsFromTimeDomain(buf){
-  // convert 0-255 to -1..1 and compute RMS
-  let sum = 0;
-  for(let i=0;i<buf.length;i++){
-    const v = (buf[i] - 128)/128;
-    sum += v*v;
-  }
-  return Math.sqrt(sum / buf.length);
-}
-function calcPeakFreq(){
-  if(!analyser) return 0;
-  analyser.getByteFrequencyData(dataArray);
-  // find peak
-  let maxI=0, maxV=0;
-  for(let i=0;i<dataArray.length;i++){
-    if(dataArray[i]>maxV){maxV=dataArray[i];maxI=i;}
-  }
-  // map bin to Hz
-  const hz = maxI * (audioCtx.sampleRate / 2) / dataArray.length;
-  return hz;
-}
-
-let animId = null;
-function runLoop(){
-  if(!running){ cancelAnimationFrame(animId); return; }
-  // time domain for volume
-  const buf = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(buf);
-  const volRaw = rmsFromTimeDomain(buf) * settings.sensitivity;
-  const freq = calcPeakFreq();
-  // update UI & draw
-  updateUI(volRaw, freq);
-  drawOrb(volRaw, freq);
-
-  animId = requestAnimationFrame(runLoop);
-}
-
-// pulses (gallery)
-function createPulse(){
-  const now = Date.now();
-  const pulse = { ts: now, vol: volBar.value, freq: freqBar.value, mood: moodText.textContent };
-  pulses.unshift(pulse);
-  if(pulses.length>200) pulses.pop();
-  savePulses(); renderGallery();
-}
-function renderGallery(){
-  pulseList.innerHTML = '';
-  pulses.forEach((p, i)=>{
-    const li = document.createElement('li'); li.className='pulse-item';
-    li.innerHTML = `<div><strong>${new Date(p.ts).toLocaleString()}</strong></div>
-      <div>Vol: ${Number(p.vol).toFixed(4)} · Freq: ${Math.round(p.freq)}Hz</div>
-      <div>Mood: ${p.mood}</div>
-      <div style="margin-top:8px"><button class="btn" data-i="${i}">Share</button></div>`;
-    pulseList.appendChild(li);
-    li.querySelector('button').onclick = ()=>sharePulse(i);
-  });
-}
-function clearAllPulses(){ if(confirm('Clear all saved pulses?')){ pulses=[]; savePulses(); renderGallery(); } }
-function sharePulse(i){
-  const p = pulses[i];
-  const out = `Pulse ${new Date(p.ts).toLocaleString()}\nVol: ${p.vol}\nFreq: ${Math.round(p.freq)}Hz\nMood: ${p.mood}`;
-  if(navigator.share) navigator.share({text:out, title:'Orb Pulse'}).catch(()=>alert(out));
-  else prompt('Copy pulse data', out);
-}
-function exportAllJSON(){
-  const blob = new Blob([JSON.stringify(pulses, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'orbic-pulses.json';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-}
-
-// controls wiring
-startBtn.onclick = startMic; stopBtn.onclick = stopMic;
-createPulseBtn.onclick = createPulse; shareLatestBtn.onclick = ()=>{ if(pulses[0]) sharePulse(0); else alert('No pulses yet'); };
-clearGallery.onclick = clearAllPulses; exportJSON.onclick = exportAllJSON;
-
-// settings binds
-sensitivityEl.oninput = e=>{ settings.sensitivity = Number(e.target.value); };
-calmEl.oninput = e=>{ settings.calm = Number(e.target.value); volBar.max = Math.max(0.08, settings.calm*10); };
-orbHueEl.oninput = e=>{ settings.hue = Number(e.target.value); };
-orbLifeEl.oninput = e=>{ settings.life = Number(e.target.value); };
-
-// tabs
-document.getElementById('tab-live').onclick = ()=>showTab('live');
-document.getElementById('tab-gallery').onclick = ()=>showTab('gallery');
-document.getElementById('tab-settings').onclick = ()=>showTab('settings');
-function showTab(id){
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.querySelector(`#tab-${id}`).classList.add('active');
-  fit();
-}
-
-// initial UI
-fit();
-loadPulses();
+  // init: small preview
+  drawOrb(0.002, 120);
+})();
