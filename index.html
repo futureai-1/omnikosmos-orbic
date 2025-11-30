@@ -3,98 +3,116 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Orbic Intelligence — Live Orb</title>
-  <link rel="icon" href="./favicon.svg" />
-  <link rel="manifest" href="./manifest.json" />
-  <link rel="stylesheet" href="./style.css" />
+  <title>Orbic Intelligence — Live Orb v3</title>
+
+  <!-- favicon (same directory) -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- styles -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- basic meta -->
+  <meta name="description" content="Orbic Intelligence — Live Orb (voice → energy → state). Client-side audio visualization." />
 </head>
 <body>
-  <header class="top">
+  <header class="topbar">
     <div class="brand">
-      <img src="./favicon.svg" alt="Orb" class="logo" />
-      <h1>Orbic Intelligence <span class="ver">v3</span></h1>
+      <img src="favicon.svg" alt="Orbic" class="brand-icon">
+      <span class="brand-title">Orbic Intelligence <small>v3</small></span>
     </div>
-    <nav class="tabs">
-      <button id="tab-live" class="active">Live Orb</button>
-      <button id="tab-gallery">Pulse Gallery</button>
-      <button id="tab-settings">Settings</button>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-section="orb">Live Orb</button>
+      <button class="nav-btn" data-section="gallery">Pulse Gallery</button>
+      <button class="nav-btn" data-section="settings">Settings</button>
     </nav>
   </header>
 
-  <main id="main">
-    <section id="live" class="panel active">
-      <div class="orbStage">
-        <div id="orbCanvasWrap">
-          <canvas id="orb"></canvas>
-        </div>
+  <main class="container">
+    <!-- Live Orb -->
+    <section id="orb" class="section active">
+      <div class="orb-stage" aria-hidden="false">
+        <canvas id="orbCanvas" width="900" height="520" role="img" aria-label="Live orb visualization"></canvas>
       </div>
 
       <div class="controls">
         <div class="buttons">
-          <button id="startMic">Start Mic</button>
-          <button id="stopMic" disabled>Stop Mic</button>
-          <button id="createPulse">Create Pulse</button>
-          <button id="shareLatest">Share Latest</button>
+          <button id="startMic" class="btn primary">Start Mic</button>
+          <button id="stopMic" class="btn" disabled>Stop Mic</button>
+          <button id="createPulse" class="btn">Create Pulse</button>
+          <button id="shareLatest" class="btn">Share Latest</button>
         </div>
 
-        <div class="bars">
-          <div class="barRow">
-            <label>Volume (RMS)</label>
-            <progress id="volBar" value="0" max="0.1"></progress>
-            <div id="volLabel">0.000</div>
+        <div class="meters">
+          <label>Volume (RMS)</label>
+          <div class="meter-bar">
+            <div id="volBar" class="bar-fill" style="width:0%"></div>
           </div>
-          <div class="barRow">
-            <label>Frequency (Hz)</label>
-            <progress id="freqBar" value="0" max="22050"></progress>
-            <div id="freqLabel">0 Hz</div>
+          <div class="meter-values">
+            <span id="volValue">0.000</span>
           </div>
-          <div class="barRow">
-            <label>Mood</label>
-            <div id="moodLabel">Neutral</div>
+
+          <label>Frequency (Hz)</label>
+          <div class="meter-bar">
+            <div id="freqBar" class="bar-fill" style="width:0%"></div>
+          </div>
+          <div class="meter-values">
+            <span id="freqValue">0</span>
+          </div>
+
+          <div class="mood">
+            Mood: <strong id="mood">Neutral</strong>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="gallery" class="panel">
-      <div class="galleryControls">
-        <button id="exportJSON">Export All (JSON)</button>
-        <button id="clearGallery">Clear</button>
+    <!-- Pulse Gallery -->
+    <section id="gallery" class="section">
+      <h2>Pulse Gallery</h2>
+      <div id="pulseList" class="pulse-list" aria-live="polite"></div>
+      <div class="gallery-actions">
+        <button id="exportJSON" class="btn">Export All (JSON)</button>
+        <button id="clearGallery" class="btn">Clear</button>
       </div>
-      <div id="pulseList" class="pulseList"></div>
     </section>
 
-    <section id="settings" class="panel">
+    <!-- Settings -->
+    <section id="settings" class="section">
       <h2>Settings & Live Measurements</h2>
-      <div class="settingRow">
+      <div class="setting-row">
         <label>Sensitivity</label>
-        <input id="sensitivity" type="range" min="0.1" max="3" step="0.01" value="1.0"/>
+        <input id="sensitivity" type="range" min="0" max="1" step="0.01" value="0.5">
       </div>
-      <div class="settingRow">
+      <div class="setting-row">
         <label>Calm threshold</label>
-        <input id="calm" type="range" min="0" max="0.1" step="0.001" value="0.01"/>
+        <input id="calmThreshold" type="range" min="0" max="1" step="0.01" value="0.08">
       </div>
-      <div class="settingRow">
-        <label>Orb Hue</label>
-        <input id="hue" type="range" min="0" max="360" step="1" value="150"/>
+      <div class="setting-row">
+        <label>Orb hue</label>
+        <input id="orbHue" type="range" min="0" max="360" step="1" value="160">
       </div>
-      <div class="settingRow">
-        <label>Orb Life (breath)</label>
-        <input id="life" type="range" min="0.2" max="3" step="0.01" value="1.0"/>
+      <div class="setting-row">
+        <label>Orb breath</label>
+        <input id="orbLife" type="range" min="0.1" max="2" step="0.05" value="0.9">
       </div>
-
       <div class="help">
-        <h3>Measurement Scale</h3>
+        <p><strong>Measurement scale</strong></p>
         <ul>
-          <li>Volume (RMS) — 0.000–0.010 silent, 0.010–0.030 quiet, 0.030–0.100 loud</li>
-          <li>Frequency (Hz) — 0–200 calm, 200–800 normal, 800–2000 alert, 2000+ high energy</li>
+          <li>Volume (RMS): 0.000–0.010 silent/calm → 0.010–0.030 normal → 0.030+ high</li>
+          <li>Frequency (Hz): 0–200 calm/low, 200–800 normal, 800–2000 alert, 2000+ high</li>
         </ul>
       </div>
     </section>
   </main>
 
-  <footer class="footer">OMNIKOSMOS — local audio processing • client-side only</footer>
+  <footer class="footer">
+    <small>© OMNIKOSMOS — client-side only. No audio upload. Built for privacy.</small>
+  </footer>
 
-  <script src="./app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>
