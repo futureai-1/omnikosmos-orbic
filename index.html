@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orbic Intelligence — Live Orb</title>
+  <link rel="icon" href="./favicon.svg" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="./favicon.svg" alt="Orb" class="logo" />
+      <h1>Orbic Intelligence <span class="ver">v3</span></h1>
+    </div>
+    <nav class="tabs">
+      <button id="tab-live" class="active">Live Orb</button>
+      <button id="tab-gallery">Pulse Gallery</button>
+      <button id="tab-settings">Settings</button>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section id="live" class="panel active">
+      <div class="orbStage">
+        <div id="orbCanvasWrap">
+          <canvas id="orb"></canvas>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="buttons">
+          <button id="startMic">Start Mic</button>
+          <button id="stopMic" disabled>Stop Mic</button>
+          <button id="createPulse">Create Pulse</button>
+          <button id="shareLatest">Share Latest</button>
+        </div>
+
+        <div class="bars">
+          <div class="barRow">
+            <label>Volume (RMS)</label>
+            <progress id="volBar" value="0" max="0.1"></progress>
+            <div id="volLabel">0.000</div>
+          </div>
+          <div class="barRow">
+            <label>Frequency (Hz)</label>
+            <progress id="freqBar" value="0" max="22050"></progress>
+            <div id="freqLabel">0 Hz</div>
+          </div>
+          <div class="barRow">
+            <label>Mood</label>
+            <div id="moodLabel">Neutral</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="gallery" class="panel">
+      <div class="galleryControls">
+        <button id="exportJSON">Export All (JSON)</button>
+        <button id="clearGallery">Clear</button>
+      </div>
+      <div id="pulseList" class="pulseList"></div>
+    </section>
+
+    <section id="settings" class="panel">
+      <h2>Settings & Live Measurements</h2>
+      <div class="settingRow">
+        <label>Sensitivity</label>
+        <input id="sensitivity" type="range" min="0.1" max="3" step="0.01" value="1.0"/>
+      </div>
+      <div class="settingRow">
+        <label>Calm threshold</label>
+        <input id="calm" type="range" min="0" max="0.1" step="0.001" value="0.01"/>
+      </div>
+      <div class="settingRow">
+        <label>Orb Hue</label>
+        <input id="hue" type="range" min="0" max="360" step="1" value="150"/>
+      </div>
+      <div class="settingRow">
+        <label>Orb Life (breath)</label>
+        <input id="life" type="range" min="0.2" max="3" step="0.01" value="1.0"/>
+      </div>
+
+      <div class="help">
+        <h3>Measurement Scale</h3>
+        <ul>
+          <li>Volume (RMS) — 0.000–0.010 silent, 0.010–0.030 quiet, 0.030–0.100 loud</li>
+          <li>Frequency (Hz) — 0–200 calm, 200–800 normal, 800–2000 alert, 2000+ high energy</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">OMNIKOSMOS — local audio processing • client-side only</footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
